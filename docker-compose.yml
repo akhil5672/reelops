@@ -1,0 +1,43 @@
+# Local dev stack: no AWS account needed. LocalStack fakes S3 + SQS.
+services:
+  localstack:
+    image: localstack/localstack:3.8
+    environment:
+      SERVICES: s3,sqs
+      AWS_DEFAULT_REGION: us-east-1
+    ports: ["4566:4566"]
+    volumes:
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "awslocal sqs get-queue-url --queue-name reelops-ingest-local"]
+      interval: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  ingest-api:
+    build: services/ingest-api
+    environment: &aws_local
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      RAW_BUCKET: reelops-raw-local
+      QUEUE_URL: http://localstack:4566/000000000000/reelops-ingest-local
+      REDIS_HOST: redis
+    ports: ["8000:8000"]
+    depends_on:
+      localstack: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  transcode-worker:
+    build: services/transcode-worker
+    environment:
+      <<: *aws_local
+      FAIL_RATE: "0.05"
+    ports: ["9100:9100"]
+    depends_on:
+      localstack: { condition: service_healthy }
+      redis: { condition: service_started }

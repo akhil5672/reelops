@@ -1,0 +1,43 @@
+name: terraform-plan
+
+on:
+  pull_request:
+    paths: ["infra/terraform/envs/**", "infra/terraform/modules/**"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        stack: [network, data, platform]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::743157045351:role/reelops-gha-tf-plan   # read-only role
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: plan
+        working-directory: infra/terraform/envs/dev/${{ matrix.stack }}
+        run: |
+          terraform init -input=false
+          set +e
+          terraform plan -input=false -lock=false -no-color -detailed-exitcode > plan.txt 2>&1
+          code=$?
+          set -e
+          {
+            echo "### ${{ matrix.stack }}"
+            [[ $code == 0 ]] && echo "No changes (no drift)."
+            [[ $code == 2 ]] && echo "Changes detected:"
+            echo '```'; tail -n 60 plan.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [[ $code != 1 ]]

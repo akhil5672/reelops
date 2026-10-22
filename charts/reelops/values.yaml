@@ -1,0 +1,61 @@
+# Defaults. Per-environment overrides live in the reelops-gitops repo (envs/<env>/values.yaml).
+env: staging
+
+image:
+  registry: 743157045351.dkr.ecr.us-east-1.amazonaws.com
+  tag: ""            # CI writes the git SHA here via the gitops repo
+
+# Synced from AWS Secrets Manager (reelops/<env>/app-config) by External Secrets Operator.
+# Terraform's data stack writes that secret, so no endpoints are copied by hand.
+appConfig:
+  enabled: true
+  secretStore: aws-secrets-manager
+  refreshInterval: 5m
+
+services:
+  ingest-api:
+    repository: reelops/ingest-api
+    replicas: 2
+    port: 8000
+    livenessPath: /healthz
+    readinessPath: /readyz
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { memory: 256Mi }
+    hpa: { enabled: true, min: 2, max: 6, cpuUtilization: 60 }
+    pdb: { enabled: true, minAvailable: 1 }
+    spreadAcrossZones: true
+    env:
+      CHAOS_FAIL_RATE: "0"
+  transcode-worker:
+    repository: reelops/transcode-worker
+    replicas: 2
+    port: 9100
+    livenessPath: /metrics
+    resources:
+      requests: { cpu: 100m, memory: 96Mi }
+      limits: { memory: 192Mi }
+    hpa: { enabled: false }
+    pdb: { enabled: true, minAvailable: 1 }
+    terminationGracePeriodSeconds: 30
+    nodeSelector: { workload: transcode }
+    tolerations:
+      - { key: spot, operator: Equal, value: "true", effect: NoSchedule }
+    env:
+      FAIL_RATE: "0.05"
+      MIN_SECONDS: "2"
+      MAX_SECONDS: "8"
+
+ingress:
+  enabled: true
+  service: ingest-api
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /readyz
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+
+serviceMonitor:
+  enabled: true
+  interval: 15s

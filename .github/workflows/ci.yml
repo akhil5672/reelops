@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT: "743157045351"
+  GITOPS_REPO: akhil5672/reelops-gitops
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        svc: [ingest-api, transcode-worker]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.svc }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check --config ../../ruff.toml .
+      - run: python -m pytest -q
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra/terraform
+      - name: terraform validate (no backend)
+        run: |
+          for d in infra/terraform/bootstrap infra/terraform/envs/dev/*; do
+            echo "::group::$d"
+            terraform -chdir="$d" init -backend=false -input=false >/dev/null
+            terraform -chdir="$d" validate
+            echo "::endgroup::"
+          done
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: helm lint + render
+        run: |
+          helm lint charts/reelops --set image.tag=ci
+          helm template ci charts/reelops --set image.tag=ci > /tmp/rendered.yaml
+      - name: kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 /tmp/rendered.yaml
+
+  build:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # lets GitHub mint an OIDC token for AWS. No stored AWS keys.
+    strategy:
+      matrix:
+        svc: [ingest-api, transcode-worker]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT }}:role/reelops-gha-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.svc }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/reelops/${{ matrix.svc }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.svc }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.svc }}
+      - name: Gate on ECR scan (fail on CRITICAL)
+        run: |
+          repo="reelops/${{ matrix.svc }}"
+          aws ecr wait image-scan-complete --repository-name "$repo" --image-id imageTag=${{ github.sha }}
+          crit=$(aws ecr describe-image-scan-findings --repository-name "$repo" --image-id imageTag=${{ github.sha }} \
+                 --query 'imageScanFindings.findingSeverityCounts.CRITICAL' --output text)
+          echo "CRITICAL findings: $crit"
+          [[ "$crit" == "None" || "$crit" == "0" ]]
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency: gitops-staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}   # fine-grained PAT: Contents read/write on reelops-gitops only
+      - name: Bump staging image tag
+        run: |
+          yq -i '.image.tag = "${{ github.sha }}"' envs/staging/values.yaml
+          git config user.name  "reelops-ci"
+          git config user.email "reelops-ci@users.noreply.github.com"
+          git commit -am "staging: reelops ${GITHUB_SHA::7}"
+          git push
