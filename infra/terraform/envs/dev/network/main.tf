@@ -11,7 +11,7 @@ module "vpc" {
   name            = var.name
   cidr            = var.cidr
   azs             = local.azs
-  private_subnets = [for i, _ in local.azs : cidrsubnet(var.cidr, 4, i)]      # 10.20.0.0/20, 10.20.16.0/20
+  private_subnets = [for i, _ in local.azs : cidrsubnet(var.cidr, 4, i)]       # 10.20.0.0/20, 10.20.16.0/20
   public_subnets  = [for i, _ in local.azs : cidrsubnet(var.cidr, 8, 200 + i)] # 10.20.200.0/24, 10.20.201.0/24
 
   # Cost choice: one NAT gateway for both AZs. In production you'd use one per AZ.
