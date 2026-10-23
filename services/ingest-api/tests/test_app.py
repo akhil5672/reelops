@@ -55,3 +55,18 @@ def test_unknown_status_is_404(client):
 def test_metrics_exposed(client):
     c, _ = client
     assert "ingest_requests_total" in c.get("/metrics").text
+
+
+def test_readyz_503_when_redis_down(client, monkeypatch):
+    c, _ = client
+    import app as app_module
+
+    class DeadRedis:
+        def ping(self):
+            raise ConnectionError("redis down")
+
+    monkeypatch.setattr(app_module, "store", lambda: DeadRedis())
+
+    r = c.get("/readyz")
+    assert r.status_code == 503
+    assert r.json()["detail"] == "dependencies unavailable"
