@@ -7,8 +7,8 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 data "aws_iam_policy_document" "gha_trust" {
   for_each = {
-    push = "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main"
-    plan = "repo:${var.github_owner}/${var.github_repo}:pull_request"
+    push = "repo:${var.github_owner}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}:ref:refs/heads/main"
+    plan = "repo:${var.github_owner}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}:pull_request"
   }
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

@@ -27,3 +27,13 @@ variable "ecr_repos" {
   type    = set(string)
   default = ["ingest-api", "transcode-worker"]
 }
+variable "github_owner_id" {
+  description = "Numeric GitHub owner ID (in the OIDC sub claim)"
+  type        = string
+  default     = "53939261"
+}
+variable "github_repo_id" {
+  description = "Numeric GitHub repo ID (in the OIDC sub claim)"
+  type        = string
+  default     = "1428852834"
+}
