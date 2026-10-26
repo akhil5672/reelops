@@ -53,7 +53,7 @@ kubeconfig: ## point kubectl at the EKS cluster
 ## ---------- phase 07: GitOps ----------
 argocd: ## install Argo CD and hand the cluster to the gitops repo
 	helm repo add argo https://argoproj.github.io/argo-helm >/dev/null && helm repo update >/dev/null
-	helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace --version 7.6.12 --wait
+	helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace --version 10.11.1 --wait
 	kubectl apply -f ../reelops-gitops/bootstrap/root.yaml
 argocd-password: ## print the initial Argo CD admin password
 	@kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
