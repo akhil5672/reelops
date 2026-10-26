@@ -9,5 +9,5 @@ variable "cluster_name" {
 variable "kubernetes_version" {
   description = "Use a version EKS currently offers in standard support: aws eks describe-cluster-versions"
   type        = string
-  default     = "1.31"
+  default     = "1.37"
 }
